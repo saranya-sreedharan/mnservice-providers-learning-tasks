@@ -1,0 +1,101 @@
+echo -e "${YELLOW}This script is used to delete Docker and Apache2 completely from Ubuntu 20.04.${NC}"
+
+echo "--------------------------------------------------------------------------------------------------------"
+
+RED='\033[0;31m' # Red colored text
+NC='\033[0m' # Normal text
+YELLOW='\033[33m' # Yellow Color
+GREEN='\033[32m' # Green Color
+
+# Function to check and uninstall Docker
+check_and_uninstall_docker() {
+    if dpkg -l | grep -E "docker-ce|docker-ce-cli|containerd.io"; then
+        sudo systemctl stop docker
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Docker successfully stopped.${NC}"
+        else
+            echo -e "${RED}Failed to stop Docker.${NC}"
+            exit 1
+        fi
+
+        sudo apt-get purge docker-ce docker-ce-cli containerd.io -y
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Docker successfully uninstalled.${NC}"
+        else
+            echo -e "${RED}Failed to uninstall Docker.${NC}"
+            exit 1
+        fi
+
+        sudo rm -rf /var/lib/docker
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Docker data directory successfully removed.${NC}"
+        else
+            echo -e "${RED}Failed to remove Docker data directory.${NC}"
+            exit 1
+        fi
+
+        sudo apt-get autoremove --purge docker-engine -y
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Docker dependencies successfully removed.${NC}"
+        else
+            echo -e "${RED}Failed to remove Docker dependencies.${NC}"
+            exit 1
+        fi
+
+        sudo grep -r -i -E "docker|containerd" /etc/docker /etc/default/docker /etc/systemd/system /etc/apt/sources.list.d /var/lib/docker
+        echo -e "${GREEN}Docker has been uninstalled, its data removed, and dependencies removed.${NC}"
+    else
+        echo -e "${YELLOW}Docker is not installed.${NC}"
+    fi
+}
+
+# Function to check and uninstall Apache2
+check_and_uninstall_apache() {
+    if dpkg -l | grep -E "apache2|httpd"; then
+        sudo apt-get purge apache2 -y
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Apache2 successfully removed.${NC}"
+        else
+            echo -e "${RED}Failed to remove Apache2.${NC}"
+            exit 1
+        fi
+
+        sudo apt-get autoremove -y
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Autoremove successful.${NC}"
+        else
+            echo -e "${RED}Autoremove failed.${NC}"
+            exit 1
+        fi
+
+        sudo apt-get autoclean
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Autoclean successful.${NC}"
+        else
+            echo -e "${RED}Autoclean failed.${NC}"
+            exit 1
+        fi
+
+        sudo apt-get remove apache2-utils -y
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Apache2-utils successfully removed.${NC}"
+        else
+            echo -e "${RED}Failed to remove Apache2-utils.${NC}"
+            exit 1
+        fi
+
+        dpkg -l | grep -E "apache2|httpd"
+    else
+        echo -e "${YELLOW}Apache2 is not installed.${NC}"
+    fi
+}
+
+# Check and uninstall Docker
+echo -e "${YELLOW}Checking and uninstalling Docker...${NC}"
+check_and_uninstall_docker
+
+echo -e "${YELLOW}Next, we are uninstalling Apache and its dependencies...${NC}"
+
+# Check and uninstall Apache2
+echo -e "${YELLOW}Checking and uninstalling Apache2...${NC}"
+check_and_uninstall_apache

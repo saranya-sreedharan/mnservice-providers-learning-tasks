@@ -1,0 +1,24 @@
+#!/bin/bash
+echo -e "${YELLOW}..update this packages ${NC}"
+# Update packages
+if ! sudo yum update -y; then
+    echo "Failed to update packages."
+    exit 1
+fi
+
+echo -e "${YELLOW}...verifying nginx installation${NC}"
+# Check if Nginx is installed
+if [ -x "$(command -v nginx)" ]; then
+    echo -e "${GREEN}Nginx is already installed.${NC}"
+else
+    # Install Nginx
+    echo -e "${YELLOW}Installing Nginx...${NC}"
+    sudo apt-get install -y nginx
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Nginx Successfully installed.${NC}"
+    else
+        echo -e "${RED}Nginx Failed to install.${NC}"
+        exit 1
+    fi
+fi
+

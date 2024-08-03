@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Check if Nginx is running
+if pgrep -x "nginx" > /dev/null
+then
+    # Nginx is running, stop it
+    echo "Stopping Nginx..."
+    sudo systemctl stop nginx
+    echo "Nginx stopped successfully."
+
+    # Purge Nginx
+    echo "Purging Nginx..."
+    sudo apt-get purge nginx* -y
+    echo "Nginx purged successfully."
+else
+    # Nginx is not running
+    if dpkg -l | grep -q "nginx"
+    then
+        # Nginx is installed but not running
+        echo "Nginx is not running, but it is installed. Purging Nginx..."
+        sudo apt-get purge nginx* -y
+        echo "Nginx purged successfully."
+    else
+        # Nginx is not installed
+        echo "Nginx is not present. Nothing to delete."
+    fi
+fi

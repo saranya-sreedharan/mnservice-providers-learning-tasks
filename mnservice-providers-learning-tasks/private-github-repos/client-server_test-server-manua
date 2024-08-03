@@ -1,0 +1,11 @@
+sudo apt update
+sudo apt install docker.io
+
+sudo docker login saranya2.mnserviceproviders.com
+username : admin
+password : Password@123
+
+sudo docker images
+
+
+sudo docker pull saranya2.mnserviceproviders.com/httpd:v2

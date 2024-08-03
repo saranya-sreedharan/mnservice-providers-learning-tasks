@@ -1,0 +1,113 @@
+sudo apt update
+
+sudo apt install nginx
+
+sudo apt install docker.io -y
+
+sudo vi /etc/docker/daemon.json
+
+ {
+  "insecure-registries": ["localhost:5001"]
+ }
+
+restart docker
+
+mkdir auth
+
+sudo docker run --entrypoint htpasswd httpd:2 -Bbn admin Password@123 > auth/htpasswd
+
+docker run -d \
+-p 5001:5000 \
+--restart=always \
+--name brezy-registry \
+-v "$(pwd)"/auth:/auth \
+-e "REGISTRY_AUTH=htpasswd" \
+-e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \
+-e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+registry:2
+
+sudo docker login localhost:5001
+give username : admin
+password : Password@123
+
+sudo docker images
+
+sudo docker tag httpd:2 localhost:5001/httpd:v1
+
+sudo docker push localhost:5001/httpd:v1
+
+sudo cd /etc/nginx
+
+cd sites-available/
+
+//sudo cat default
+
+sudo cp default default_old
+
+sudo vi default
+  server {
+    listen 80;
+    server_name saranya2.mnserviceproviders.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    
+
+    # Redirect all other traffic to the HTTPS version of the site
+    error_page 497 https://$host$request_uri;
+}
+
+
+
+
+sudo nginx -t
+
+sudo service nginx restart
+
+
+snap install core; sudo snap refresh core
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+
+certbot --nginx -d saranya2.mnserviceproviders.com --register-unsafely-without-email
+
+cd /etc/nginx/sites-available/
+sudo vi default (end of the file add this.(inside server block) )
+
+listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/saranya2.mnserviceproviders.com-0001/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/saranya2.mnserviceproviders.com-0001/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+save it and exit. 
+
+sudo vi default (create another server block, don't remove the content any thing, add this block also end of the file )
+
+server {
+    if ($host = saranya2.mnserviceproviders.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name saranya2.mnserviceproviders.com;
+    return 404; # managed by Certbot
+
+}
+
+service nginx restart
+
+sudo docker login saranya2.mnserviceproviders.com
+sudo docker tag httpd:2 saranya2.mnserviceproviders.com/httpd:v2 
+sudo docker push saranya2.mnserviceproviders.com/httpd:v2
+
+
+

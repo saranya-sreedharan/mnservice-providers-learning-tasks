@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Update package information
+sudo apt update
+
+# Install Docker
+sudo apt install docker.io -y
+
+# Login to the private registry
+sudo docker login saranya2.mnserviceproviders.com
+# Provide username: admin, password: Password@123
+
+# Display Docker images
+sudo docker images
+
+# Pull Docker image from the private registry
+sudo docker pull saranya2.mnserviceproviders.com/httpd:v2

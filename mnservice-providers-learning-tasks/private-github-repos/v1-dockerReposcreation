@@ -1,0 +1,270 @@
+#!/bin/bash
+
+#This script is used to setup a private docker repository using nginx in a ubuntu 20.04.
+
+RED='\033[0;31m'  # Red colored text
+NC='\033[0m'      # Normal text
+YELLOW='\033[33m'  # Yellow Color
+GREEN='\033[32m'   # Green Color
+
+echo "Enter the Domain_name:"
+read -r domain_name
+
+
+echo -e "${YELLOW}... updating packages${NC}"
+# Update package information
+if ! sudo apt update; then
+    echo -e "${RED}The system update failed.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...verifying nginx installation${NC}"
+# Check if Nginx is installed
+if [ -x "$(command -v nginx)" ]; then
+    echo -e "${GREEN}Nginx is already installed.${NC}"
+else
+    # Install Nginx
+    echo -e "${YELLOW}Installing Nginx...${NC}"
+    sudo apt-get install -y nginx
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Nginx Successfully installed.${NC}"
+    else
+        echo -e "${RED}Nginx Failed to install.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${YELLOW}...checking nginx is installed or not${NC}"
+# Check if Nginx is running
+if sudo systemctl is-active --quiet nginx; then
+    echo "${GREEN}Nginx is running.${NC}"
+else
+    # Start and enable Nginx
+    echo "${YELLOW}Starting and enabling Nginx...${NC}"
+    sudo systemctl start nginx
+    sudo systemctl enable nginx
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Nginx up and running.${NC}"
+    else
+        echo -e "${RED}Nginx Failed to start nginx.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${YELLOW}...docker installation and setup.....${NC}"
+# Check if Docker is installed
+if [ -x "$(command -v docker)" ]; then
+    echo "${GREEN}Docker is already installed.${NC}"
+else
+    # Install Docker
+    echo -e "${YELLOW}Installing Docker...${NC}"
+    sudo apt-get update
+    sudo apt-get install -y docker.io
+    if ! [ -x "$(command -v docker)" ]; then
+        echo -e "${RED}Docker installation failed.${NC}"
+        exit 1
+    else
+        echo "${GREEN}Docker is successfully installed.${NC}"
+    fi
+fi
+
+echo -e "${YELLOW}...checking the docker is running successfully or not...${NC}"
+
+# Check if Docker is running
+if sudo systemctl is-active --quiet docker; then
+    echo "${GREEN}Docker is running.${NC}"
+else
+    # Start Docker
+    echo "${YELLOW}Starting Docker...${NC}"
+    sudo systemctl start docker
+    sudo systemctl enable docker
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Docker Successfully started.${NC}"
+    else
+        echo -e "${RED}Docker Failed to start.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${YELLOW}...configuring docker damon for local host...${NC}"
+# Configure Docker daemon
+if ! sudo bash -c 'cat <<EOL > /etc/docker/daemon.json
+{
+  "insecure-registries": ["localhost:5000"]
+}
+EOL'; then
+    echo -e "${RED}The Docker daemon configuration failed.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...Restarting docker...${NC}"
+# Restart Docker
+if ! sudo systemctl restart docker; then
+    echo -e "${RED}Failed to restart Docker after modifying the daemon.json.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW }...creating authentication directory...${NC}"
+# Create authentication directory
+if ! mkdir auth; then
+    echo -e "${RED}Failed to create auth directory.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...Creating the password....${NC}"
+# Generate htpasswd file
+if ! sudo docker run --entrypoint htpasswd httpd:2 -Bbn admin Password@123 > auth/htpasswd; then
+    echo -e "${RED}Failed to create htpasswd file.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...Running the private docker repository...${NC}"
+# Run private Docker registry
+if ! sudo docker run -d \
+    -p 5000:5000 \
+    --restart=always \
+    --name brezy-registry \
+    -v "$(pwd)"/auth:/auth \
+    -e "REGISTRY_AUTH=htpasswd" \
+    -e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \
+    -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+    registry:2; then
+    echo -e "${RED}Failed to execute the private Docker registry.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...login to the localhsot...${NC}"
+if ! sudo docker login localhost:5000 -u "$username" -p "$password"; then
+    echo -e "${RED}Docker login failed${NC}."
+fi
+
+echo -e "${YELLOW}...Displaying docker images...${NC}"
+
+# Display Docker images
+sudo docker images
+
+
+echo -e "${YELLOW}...taging and pushing with the localhsot name...${NC}"
+# Tag and push Docker image to the private registry
+if ! sudo docker tag httpd:2 localhost:5000/httpd:v1; then
+ echo -e "${RED}Failed to tag the image.${NC}"
+fi
+
+if ! sudo docker push localhost:5000/httpd:v1; then
+ echo -e "${RED}Failed to push image to private repo${NC}"
+fi
+
+echo -e "${YELLOW}..configure the ssl certification...${NC}"
+
+# Configure Nginx for SSL termination
+cd /etc/nginx/conf.d/
+sudo bash -c 'cat <<EOL > saranya5.mnsp.co.in.conf
+server {
+    listen 80;
+    server_name \$domain_name;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Redirect HTTP to HTTPS
+    error_page 497 https://\$host\$request_uri;
+}
+
+server {
+    listen 80;
+    server_name \$domain_name;
+    return 404;
+}
+
+EOL'
+
+# Test Nginx configuration
+sudo nginx -t
+
+# Restart Nginx
+if ! sudo service nginx restart; then
+    echo -e "${RED}Failed to restart Nginx.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...Installing certbot...${NC}"
+# Install Certbot
+#sudo snap install core; sudo snap refresh core
+sudo snap install --classic certbot
+sudo unlink /usr/bin/certbot
+if ! sudo ln -s /snap/bin/certbot /usr/bin/certbot; then
+    echo -e "${RED}...failed to link cerbot..${NC}"
+    exit 1
+fi
+
+
+echo -e "${YELLOW}...SSL certificate with Certbot obtaining...${NC}"
+# Obtain SSL certificate with Certbot
+sudo certbot -d $domain_name
+
+echo -e "${YELLOW}...syntax checking...${NC}"
+
+# Check the syntax of the Nginx configuration
+if sudo nginx -t; then
+    echo "Nginx configuration is correct."
+else
+    echo "Nginx configuration is incorrect. Please check the syntax."
+    exit 1  # Exit with an error code
+fi
+
+echo -e "${YELLOW}...Restart nginx..${NC}"
+
+# Restart Nginx
+if ! sudo service nginx restart;then
+    echo -e "${RED}Failed to restart Nginx.${NC}"
+fi
+
+
+if ! sudo bash -c 'cat <<EOL > /etc/docker/daemon.json
+{
+  "insecure-registries": ["$domain_name"]
+}
+EOL'; then
+    echo -e "${RED}The Docker daemon configuration failed.${NC}"
+    exit 1
+fi
+
+echo -e "${YELLOW}...Restart Docker...${NC}"
+# Restart Docker:
+if ! sudo systemctl restart docker; then
+    echo -e "${RED}Failed to restart Docker after modifying the daemon.json.${NC}"
+    exit 1
+fi
+
+
+# Login to the private registry with the custom domain
+#if ! sudo docker login docker.mnserviceproviders.com; then
+ #   echo -e "{RED} Failed to login the private repo using the domain name.${NC}"
+  #  exit 1
+#fi
+
+#echo -e "${YELLOW}...docker login with the private repository...${NC}"
+#if ! sudo docker login $domain_name -u "$username" -p "$password"; then
+    echo -e "${RED}Docker login faile with customdomain${NC}."
+    exit 1
+#fi
+#echo -e "${YELLOW}...tag and push docker image to custom domain...${NC}"
+# Tag and push Docker image with custom domain
+#if ! sudo docker tag httpd:2 $domain_name/httpd:v2; then
+#    echo -e "${RED}The tag image with custom domain failed.${NC}"
+#    exit 1
+#fi
+
+#echo -e "${YELLOW}...push to the custom domain repo...${NC}"
+#if ! sudo docker push $domain_name/httpd:v2; then
+ #   echo -e "${RED}The push failed with custom domain name.${NC}"
+ #   exit 1
+#fi
+
+# Script completion message
+#echo -e "${GREEN}Script executed successfully.${NC}"

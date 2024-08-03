@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# Update package information
+sudo apt update
+
+# Install Nginx
+sudo apt install nginx -y
+
+# Install Docker
+sudo apt install docker.io -y
+
+# Configure Docker daemon
+sudo bash -c 'cat <<EOL > /etc/docker/daemon.json
+{
+  "insecure-registries": ["localhost:5001"]
+}
+EOL'
+
+# Restart Docker
+sudo systemctl restart docker
+
+# Create authentication directory
+mkdir auth
+
+# Generate htpasswd file
+sudo docker run --entrypoint htpasswd httpd:2 -Bbn admin Password@123 > auth/htpasswd
+
+# Run private Docker registry
+sudo docker run -d \
+  -p 5001:5000 \
+  --restart=always \
+  --name brezy-registry \
+  -v "$(pwd)"/auth:/auth \
+  -e "REGISTRY_AUTH=htpasswd" \
+  -e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \
+  -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+  registry:2
+
+# Login to the private registry
+sudo docker login localhost:5001
+# Provide username: admin, password: Password@123
+
+# Display Docker images
+sudo docker images
+
+# Tag and push Docker image to the private registry
+sudo docker tag httpd:2 localhost:5001/httpd:v1
+sudo docker push localhost:5001/httpd:v1
+
+# Configure Nginx for SSL termination
+cd /etc/nginx/sites-available/
+sudo cp default default_old
+sudo bash -c 'cat <<EOL > default
+server {
+    listen 80;
+    server_name saranya2.mnserviceproviders.com;
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    error_page 497 https://$host$request_uri;
+}
+
+server {
+    if ($host = saranya2.mnserviceproviders.com) {
+        return 301 https://$host$request_uri;
+    }
+    listen 80;
+    server_name saranya2.mnserviceproviders.com;
+    return 404;
+}
+EOL'
+
+# Test Nginx configuration
+sudo nginx -t
+
+# Restart Nginx
+sudo service nginx restart
+
+# Install Certbot
+sudo snap install core; sudo snap refresh core
+sudo snap install --classic certbot
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
+
+# Obtain SSL certificate with Certbot
+certbot --nginx -d saranya2.mnserviceproviders.com --register-unsafely-without-email
+
+# Add SSL configuration to Nginx default file
+sudo bash -c 'cat <<EOL >> /etc/nginx/sites-available/default
+server {
+    listen 443 ssl;
+    ssl_certificate /etc/letsencrypt/live/saranya2.mnserviceproviders.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/saranya2.mnserviceproviders.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+}
+
+server {
+    if ($host = saranya2.mnserviceproviders.com) {
+        return 301 https://$host$request_uri;
+    }
+    listen 80;
+    server_name saranya2.mnserviceproviders.com;
+    return 404;
+}
+EOL'
+
+# Restart Nginx
+sudo service nginx restart
+
+# Login to the private registry with the custom domain
+sudo docker login saranya2.mnserviceproviders.com
+
+# Tag and push Docker image with custom domain
+sudo docker tag httpd:2 saranya2.mnserviceproviders.com/httpd:v2
+sudo docker push saranya2.mnserviceproviders.com/httpd:v2
